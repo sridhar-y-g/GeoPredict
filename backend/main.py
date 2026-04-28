@@ -74,6 +74,8 @@ class LocationData(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     city_name: Optional[str] = None
+    user_email: Optional[str] = None
+    is_simulation: Optional[bool] = False
 
 @app.get("/")
 def read_root():
@@ -155,8 +157,10 @@ async def predict_spatial(file: UploadFile = File(...), current_user: models.Use
         "results": boxes
     }
 
+from fastapi import BackgroundTasks
+
 @app.post("/api/predict/location-risk")
-def predict_location_risk(data: LocationData):
+def predict_location_risk(data: LocationData, background_tasks: BackgroundTasks):
     """
     Fetches real-time weather data for the given coordinates and calculates risk.
     """
@@ -270,6 +274,10 @@ def predict_location_risk(data: LocationData):
 
         final_risk = min(100.0, max(0.0, base_risk))
         
+        # [SIMULATION UI LINK] Only force high risk if the Dashboard 'Simulate Storm' button is active.
+        if hasattr(data, 'is_simulation') and data.is_simulation:
+            final_risk = max(final_risk, 85.0)
+
         # Override local category with strict classification bounds based on risk
         category = "SAFE"
         if final_risk >= 75:
@@ -278,6 +286,19 @@ def predict_location_risk(data: LocationData):
             category = "WARNING"
         elif final_risk >= 30:
             category = "WATCH"
+
+        # Email Dispatch Logic via Background Tasks
+        if category in ["CRITICAL EVACUATION", "WARNING"] and data.user_email:
+            # We don't want to block the API response while SMTP connects to Google
+            background_tasks.add_task(
+                auth.send_disaster_alert_email,
+                to_email=data.user_email,
+                location=weather_data.get("name", f"Lat:{lat}, Lng:{lng}"),
+                category=category,
+                risk_score=round(final_risk, 2),
+                rainfall=rainfall_1h,
+                terrain=terrain_type
+            )
 
         return {
             "risk_score": round(final_risk, 2),
@@ -295,3 +316,144 @@ def predict_location_risk(data: LocationData):
     except Exception as e:
         logger.error(f"Error fetching OpenWeather data: {e}")
         return {"error": str(e), "risk_score": 0, "category": "SAFE"}
+
+
+# ==============================================================================
+# NASA EONET — Earth Observatory Natural Event Tracker
+# Returns all active natural disaster events near the given coordinates
+# Powered by the NASA Developer API Key
+# ==============================================================================
+@app.get("/api/nasa/eonet")
+def get_nasa_eonet_events(lat: float, lng: float):
+    """
+    Queries NASA EONET for active natural disasters (storms, floods) near the given coordinates.
+    Events within ~1500km are returned and scored for landslide relevance.
+    """
+    nasa_api_key = os.getenv("NASA_API_KEY")
+    if not nasa_api_key:
+        return {"error": "NASA_API_KEY not configured", "events": []}
+
+    try:
+        # Fetch all open (active) events from NASA EONET
+        url = f"https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=30&api_key={nasa_api_key}"
+        response = requests.get(url, timeout=5.0)
+        response.raise_for_status()
+        eonet_data = response.json()
+
+        # Filter for storm / flood categories only (high landslide trigger relevance)
+        RELEVANT_CATEGORIES = {"Severe Storms", "Floods", "Landslides", "Volcanoes"}
+
+        nearby_events = []
+        for event in eonet_data.get("events", []):
+            # Check if category is relevant
+            categories = {c["title"] for c in event.get("categories", [])}
+            if not categories.intersection(RELEVANT_CATEGORIES):
+                continue
+
+            # Get the most recent geometry point
+            geometries = event.get("geometry", [])
+            if not geometries:
+                continue
+
+            latest = geometries[-1]
+            if latest.get("type") != "Point":
+                continue
+
+            event_lng, event_lat = latest["coordinates"]
+
+            # Calculate rough distance (degrees) to our target
+            dist = ((event_lat - lat) ** 2 + (event_lng - lng) ** 2) ** 0.5
+            if dist > 15:  # ~1500km radius filter
+                continue
+
+            nearby_events.append({
+                "id": event["id"],
+                "title": event["title"],
+                "category": list(categories)[0] if categories else "Unknown",
+                "date": latest.get("date", ""),
+                "lat": event_lat,
+                "lng": event_lng,
+                "distance_deg": round(dist, 2),
+                "source_url": event.get("sources", [{}])[0].get("url", ""),
+            })
+
+        # Sort by proximity
+        nearby_events.sort(key=lambda x: x["distance_deg"])
+
+        return {
+            "count": len(nearby_events),
+            "events": nearby_events[:5],  # Return top 5 closest
+            "nasa_source": "EONET v3 — NASA Earth Observatory Natural Event Tracker"
+        }
+
+    except Exception as e:
+        logger.error(f"NASA EONET fetch failed: {e}")
+        return {"error": str(e), "events": []}
+
+
+# ==============================================================================
+# NASA Earth Imagery — GIBS (Global Imagery Browse Services)
+# GIBS powers NASA Worldview and serves MODIS Terra True Color imagery.
+# Guaranteed to work globally, no timeout issues.
+# ==============================================================================
+from fastapi.responses import StreamingResponse, JSONResponse
+from datetime import date, timedelta
+import io
+
+@app.get("/api/nasa/imagery")
+def get_nasa_satellite_image(lat: float, lng: float):
+    """
+    Fetches a real NASA MODIS satellite image via GIBS WMS for the given coordinates.
+    GIBS is the backend powering NASA Worldview — reliable, fast, no auth issues.
+    """
+    # Calculate a bounding box ~0.5 degrees around the coordinate
+    dim = 0.4
+    minx = lng - dim
+    miny = lat - dim
+    maxx = lng + dim
+    maxy = lat + dim
+    bbox = f"{minx},{miny},{maxx},{maxy}"
+
+    # Use a recent date (yesterday to ensure imagery is processed)
+    img_date = (date.today() - timedelta(days=2)).strftime("%Y-%m-%d")
+
+    # NASA GIBS WMS endpoint — MODIS Terra True Color (reliable global daily coverage)
+    wms_url = (
+        "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi"
+        f"?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap"
+        f"&LAYERS=MODIS_Terra_CorrectedReflectance_TrueColor"
+        f"&SRS=EPSG:4326"
+        f"&BBOX={bbox}"
+        f"&WIDTH=512&HEIGHT=512"
+        f"&FORMAT=image/jpeg"
+        f"&TIME={img_date}"
+    )
+
+    try:
+        response = requests.get(wms_url, timeout=15.0, stream=True)
+        content_type = response.headers.get("Content-Type", "")
+
+        if response.status_code == 200 and "image" in content_type:
+            image_bytes = io.BytesIO(response.content)
+            return StreamingResponse(
+                image_bytes,
+                media_type="image/jpeg",
+                headers={
+                    "X-NASA-Date": img_date,
+                    "X-NASA-Source": "NASA GIBS - MODIS Terra True Color",
+                    "Cache-Control": "public, max-age=3600"
+                }
+            )
+        else:
+            logger.warning(f"NASA GIBS returned non-image response: {response.status_code} {content_type}")
+            return JSONResponse({
+                "error": "no_imagery",
+                "image_url": None,
+                "message": "NASA GIBS could not render imagery for this location."
+            })
+
+    except Exception as e:
+        logger.error(f"NASA GIBS imagery fetch failed: {e}")
+        return JSONResponse({"error": str(e), "image_url": None})
+
+

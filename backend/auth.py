@@ -227,6 +227,104 @@ def _print_otp_console(to_email: str, otp_code: str, expire_minutes: int):
     print(f"{'='*50}\n")
 
 
+def build_disaster_alert_html(location: str, category: str, risk_score: float, rainfall: float, terrain: str):
+    """
+    Constructs a premium HTML email template for Landslide Disaster Alerts.
+    The theme adjusts based on CRITICAL EVACUATION vs WARNING.
+    """
+    theme_color = "#e11d48" if category == "CRITICAL EVACUATION" else "#f97316"
+    return f"""\
+<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:20px;background-color:#0f172a;font-family:'Segoe UI',Roboto,sans-serif;color:#e2e8f0;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="max-w-width:600px;margin:auto;background-color:#1e293b;border-radius:12px;overflow:hidden;border:1px solid #334155;">
+    <tr>
+      <td style="padding:30px;text-align:center;background-color:#0f172a;border-bottom:3px solid {theme_color};">
+        <h1 style="color:#f8fafc;margin:0;font-size:24px;letter-spacing:1px;">🚨 GeoPredict Early Warning</h1>
+        <p style="color:{theme_color};margin:10px 0 0 0;font-weight:bold;letter-spacing:2px;font-size:14px;">AUTOMATED DISASTER DISPATCH</p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:30px;">
+        <h2 style="color:{theme_color};margin:0 0 15px 0;">{category}</h2>
+        <p style="font-size:16px;line-height:1.5;">You are receiving this automated alert because a region you are tracking has crossed critical danger thresholds for landslide susceptibility.</p>
+        
+        <table width="100%" style="margin-top:20px;background-color:#0f172a;border-radius:8px;padding:15px;border:1px solid #334155;">
+          <tr>
+            <td style="padding:8px 0;color:#94a3b8;font-size:14px;"><strong>Location:</strong></td>
+            <td style="padding:8px 0;color:#f8fafc;font-size:14px;">{location}</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#94a3b8;font-size:14px;"><strong>Risk Score:</strong></td>
+            <td style="padding:8px 0;color:{theme_color};font-size:16px;font-weight:bold;">{risk_score} / 100</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#94a3b8;font-size:14px;"><strong>1h Rainfall:</strong></td>
+            <td style="padding:8px 0;color:#38bdf8;font-size:14px;">{rainfall} mm</td>
+          </tr>
+          <tr>
+            <td style="padding:8px 0;color:#94a3b8;font-size:14px;"><strong>Terrain Profile:</strong></td>
+            <td style="padding:8px 0;color:#fadd8;font-size:14px;">{terrain}</td>
+          </tr>
+        </table>
+        
+        <p style="margin-top:25px;font-size:14px;color:#cbd5e1;line-height:1.5;">
+          <strong>ACTION REQUIRED:</strong> Please advise local authorities or evacuate immediately if situated in low-lying structural zones or beneath steep slopes. Heavy rainfall combined with high subsurface saturation severely destabilizes {terrain}.
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:20px;text-align:center;background-color:#0f172a;border-top:1px solid #334155;">
+        <p style="margin:0;font-size:12px;color:#64748b;">Powered by NASA LHASA & OpenWeather API</p>
+        <p style="margin:5px 0 0 0;font-size:11px;color:#475569;">Do not reply to this automated dispatch.</p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
+
+def send_disaster_alert_email(to_email: str, location: str, category: str, risk_score: float, rainfall: float, terrain: str):
+    """Sends a formatted Mass Casualty / Disaster Alert Email via SMTP."""
+    smtp_pwd  = os.getenv("SMTP_PASSWORD", "")
+    smtp_user = os.getenv("SMTP_USER", "")
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", 587))
+
+    if smtp_pwd and smtp_pwd != "your_app_password" and smtp_user:
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = f"[{category}] GeoPredict Alert: {location}"
+            msg["From"]    = f"GeoPredict EWS <{smtp_user}>"
+            msg["To"]      = to_email
+
+            plain = (
+                f"🚨 {category} 🚨\n\n"
+                f"Location: {location}\n"
+                f"Risk Score: {risk_score}/100\n"
+                f"Rainfall (1h): {rainfall}mm\n"
+                f"Terrain: {terrain}\n\n"
+                f"Please take extreme caution or evacuate if necessary. Powered by NASA."
+            )
+            msg.attach(MIMEText(plain, "plain"))
+
+            html_body = build_disaster_alert_html(location, category, risk_score, rainfall, terrain)
+            msg.attach(MIMEText(html_body, "html"))
+
+            with smtplib.SMTP(smtp_host, smtp_port) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(smtp_user, smtp_pwd)
+                server.sendmail(smtp_user, to_email, msg.as_string())
+
+            logger.info(f"🚨 Disaster Alert successfully dispatched to {to_email} for {location}")
+        except Exception as e:
+            logger.error(f"Failed to send disaster alert email to {to_email}: {e}")
+    else:
+        logger.warning(f"Could not dispatch disaster alert to {to_email}. SMTP not configured.")
+
+
+
 @router.post("/register")
 def register_user(user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(models.User).filter(models.User.email == user.email).first()

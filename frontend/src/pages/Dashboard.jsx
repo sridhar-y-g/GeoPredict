@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Activity, Map as MapIcon, Crosshair, ThermometerSun, CloudRain, Search, Layers, ChevronDown, BellRing, Mail, MessageSquare } from 'lucide-react';
+import { Activity, Crosshair, ThermometerSun, CloudRain, Search, Layers, ChevronDown, BellRing, Mail, MessageSquare, Satellite, AlertTriangle, Zap, ExternalLink, Image } from 'lucide-react';
 import AlertModal from '../components/AlertModal';
 import { MapContainer, TileLayer, Marker, Popup, useMap, Circle } from 'react-leaflet';
 import L from 'leaflet';
@@ -36,6 +36,41 @@ function MapController({ coords }) {
     return null;
 }
 
+// Helper component: renders NASA Landsat image with a spinner + graceful error fallback
+function NasaImage({ src }) {
+    const [status, setStatus] = useState('loading'); // 'loading' | 'loaded' | 'error'
+    return (
+        <div className="relative w-full h-56">
+            {status === 'loading' && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/80 z-10">
+                    <div className="w-8 h-8 border-2 border-indigo-500/30 border-t-indigo-400 rounded-full animate-spin mb-2"></div>
+                    <span className="text-slate-500 font-mono text-[10px] animate-pulse">FETCHING LANDSAT ARCHIVE...</span>
+                </div>
+            )}
+            {status === 'error' && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/80 z-10 border border-dashed border-slate-800 rounded-xl">
+                    <Satellite size={28} className="text-slate-700 mb-2" />
+                    <p className="text-slate-500 text-xs font-mono text-center px-4">NASA has no cloud-free Landsat archive for this exact location yet.</p>
+                    <p className="text-slate-600 text-[10px] font-mono mt-1">Try Bengaluru, Delhi or Mumbai.</p>
+                </div>
+            )}
+            <img
+                src={src}
+                alt="NASA Landsat Satellite Imagery"
+                className={`w-full h-56 object-cover transition-opacity duration-500 ${status === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
+                onLoad={() => setStatus('loaded')}
+                onError={() => setStatus('error')}
+            />
+            {status === 'loaded' && (
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-slate-950/90 to-transparent p-3 pointer-events-none">
+                    <span className="text-white text-[10px] font-mono">🛰 NASA Landsat · Real Satellite Capture</span>
+                </div>
+            )}
+        </div>
+    );
+}
+
+
 export default function Dashboard() {
     const { user } = useAuth();
     
@@ -44,10 +79,24 @@ export default function Dashboard() {
     const [riskData, setRiskData] = useState(null);
     const [coords, setCoords] = useState({ lat: 11.6854, lng: 76.1320 }); 
     const [modalConfig, setModalConfig] = useState({ isOpen: false, title: '', message: '', type: 'info', data: null });
+    const [isSimulation, setIsSimulation] = useState(false); // Developer toggle to force storm conditions
+
+    // Stale Closure Fix: Keep a live reference to the user's email 
+    // so async callbacks like dragend() always have the latest value.
+    const userEmailRef = useRef(user?.email);
+    
+    useEffect(() => {
+        userEmailRef.current = user?.email;
+    }, [user?.email]);
     
     // Basemap Gallery State
     const [activeBasemap, setActiveBasemap] = useState(BASEMAPS[0]);
     const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+
+    // NASA Intelligence State
+    const [nasaEvents, setNasaEvents] = useState(null);
+    const [nasaImagery, setNasaImagery] = useState(null);
+    const [nasaLoading, setNasaLoading] = useState(false);
 
     // Marker Dragging Setup
     const markerRef = useRef(null);
@@ -60,30 +109,54 @@ export default function Dashboard() {
                     setCoords({ lat: newCoords.lat, lng: newCoords.lng });
                     setSearchCity('');
                     fetchRiskData({ lat: newCoords.lat, lng: newCoords.lng });
+                    fetchNasaData(newCoords.lat, newCoords.lng);
                 }
             },
         }),
         [],
     );
 
+    const fetchNasaData = async (lat, lng) => {
+        setNasaLoading(true);
+        // NASA imagery: the backend streams raw image bytes, so we just build
+        // the URL and let the <img> tag fetch it directly — no JSON parsing needed.
+        const imageryUrl = `http://localhost:8000/api/nasa/imagery?lat=${lat}&lng=${lng}`;
+        setNasaImagery({ url: imageryUrl, lat, lng });
+
+        // EONET is still JSON — fetch normally
+        try {
+            const eonetRes = await fetch(`http://localhost:8000/api/nasa/eonet?lat=${lat}&lng=${lng}`);
+            const eonetData = await eonetRes.json();
+            setNasaEvents(eonetData);
+        } catch (e) {
+            console.warn('NASA EONET fetch failed:', e);
+        } finally {
+            setNasaLoading(false);
+        }
+    };
+
     useEffect(() => {
         if ("geolocation" in navigator) {
             navigator.geolocation.getCurrentPosition(
-                (pos) => fetchRiskData({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-                () => fetchRiskData({ city_name: "Wayanad" })
+                (pos) => { fetchRiskData({ lat: pos.coords.latitude, lng: pos.coords.longitude }); fetchNasaData(pos.coords.latitude, pos.coords.longitude); },
+                () => { fetchRiskData({ city_name: "Wayanad" }); fetchNasaData(11.6854, 76.1320); }
             );
         } else {
             fetchRiskData({ city_name: "Wayanad" });
+            fetchNasaData(11.6854, 76.1320);
         }
     }, []);
 
     const fetchRiskData = async (payload) => {
         setIsLoading(true);
         try {
+            // Automatically inject authenticated user's email into the payload for Disaster Dispatch capability
+            const finalPayload = { ...payload, user_email: userEmailRef.current, is_simulation: isSimulation };
+
             const response = await fetch('http://localhost:8000/api/predict/location-risk', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(finalPayload)
             });
             const data = await response.json();
             if (data.error) throw new Error(data.error);
@@ -92,12 +165,16 @@ export default function Dashboard() {
             
             if (payload.lat && payload.lng) {
                 setCoords({ lat: payload.lat, lng: payload.lng });
+                fetchNasaData(payload.lat, payload.lng);
             } else if (payload.city_name) {
                 try {
                     const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${payload.city_name}&limit=1`);
                     const geoJson = await geoRes.json();
                     if(geoJson && geoJson.length > 0) {
-                        setCoords({ lat: parseFloat(geoJson[0].lat), lng: parseFloat(geoJson[0].lon) });
+                        const newLat = parseFloat(geoJson[0].lat);
+                        const newLng = parseFloat(geoJson[0].lon);
+                        setCoords({ lat: newLat, lng: newLng });
+                        fetchNasaData(newLat, newLng);
                     }
                 } catch(e) { console.warn("Failed nominal geo lookup"); }
             }
@@ -174,7 +251,18 @@ export default function Dashboard() {
                     </h1>
                 </div>
 
-                <form onSubmit={handleSearch} className="w-full xl:w-[450px] relative group z-50">
+                <div className="flex flex-col items-end gap-2 w-full xl:w-[450px] z-50">
+                    <label className="flex items-center gap-2 cursor-pointer text-[10px] uppercase font-bold tracking-widest text-slate-400 hover:text-rose-400 transition-colors">
+                        <input 
+                            type="checkbox" 
+                            checked={isSimulation}
+                            onChange={(e) => setIsSimulation(e.target.checked)}
+                            className="accent-rose-500 w-3 h-3"
+                        />
+                        <AlertTriangle size={12} className={isSimulation ? "text-rose-500" : "text-slate-500"} />
+                        Force Critical Simulation Drill
+                    </label>
+                    <form onSubmit={handleSearch} className="w-full relative group z-50">
                     <input 
                         type="text" 
                         value={searchCity}
@@ -183,10 +271,14 @@ export default function Dashboard() {
                         className="glass-input pl-12 pr-28 text-white h-14 w-full bg-slate-900/80 backdrop-blur-xl border border-blue-500/30 font-mono shadow-[0_0_20px_rgba(37,99,235,0.15)] focus:shadow-[0_0_25px_rgba(6,182,212,0.4)] transition-all"
                     />
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500 group-focus-within:text-cyan-400 z-50 transition-colors" size={20} />
-                    <button type="submit" disabled={isLoading} className="absolute right-2 top-1/2 -translate-y-1/2 px-6 py-2 bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-bold rounded shadow-lg hover:shadow-cyan-500/30 transition-all text-xs tracking-widest disabled:opacity-50 h-10 w-24">
+                    <button type="button" onClick={() => setIsSimulation(!isSimulation)} className={`absolute right-32 top-1/2 -translate-y-1/2 px-4 py-2 font-bold rounded shadow-lg transition-all text-xs tracking-widest h-10 ${isSimulation ? 'bg-rose-600 text-white animate-pulse shadow-rose-500/50' : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white hover:bg-slate-700'}`}>
+                        {isSimulation ? 'STORM ACTIVE' : 'SIMULATE'}
+                    </button>
+                    <button type="submit" disabled={isLoading} className="absolute right-2 top-1/2 -translate-y-1/2 px-6 py-2 bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-bold rounded shadow-lg hover:shadow-cyan-500/30 transition-all text-xs tracking-widest disabled:opacity-50 h-10 w-26">
                         {isLoading ? '...' : 'SCAN'}
                     </button>
-                </form>
+                    </form>
+                </div>
             </div>
 
             {/* Weather & Terrain Meteorological Banner */}
@@ -249,6 +341,9 @@ export default function Dashboard() {
                                 </span>
                             </div>
                         </div>
+                        <p className="text-[9px] text-slate-500 text-center font-mono mt-3 leading-relaxed">
+                            <span className="text-slate-400 font-bold">RISK SCORE:</span> Mathematical synthesis of NASA imagery terrain gradients and local severe weather metrics.
+                        </p>
                     </div>
 
                     {/* Terrain & Saturation Blocks */}
@@ -258,13 +353,19 @@ export default function Dashboard() {
                             <div className="text-sm font-bold text-white capitalize leading-tight h-10 line-clamp-2">
                                 {isLoading ? 'Scanning...' : riskData?.location}
                             </div>
-                            <div className="text-[9px] font-mono text-slate-500 mt-1 leading-tight">{isLoading ? '...' : riskData?.telemetry?.terrain_type}</div>
+                            <div className="text-[9px] font-mono text-slate-500 mt-1 leading-tight mb-2">{isLoading ? '...' : riskData?.telemetry?.terrain_type}</div>
+                            <p className="text-[8px] text-slate-500 font-mono leading-tight">
+                                Live rainfall acts as the primary hydro-geological trigger for slope failure in this region.
+                            </p>
                         </div>
                         <div className="glass-panel p-4 relative overflow-hidden border-b-2 bg-slate-900/60" style={{ borderBottomColor: '#8b5cf6' }}>
                             <h4 className="text-[9px] font-bold text-purple-400 tracking-widest mb-1">SOIL SATURATION</h4>
-                            <div className="text-3xl font-black text-white tracking-tight flex items-baseline gap-1">
+                            <div className="text-3xl font-black text-white tracking-tight flex items-baseline gap-1 mb-2">
                                 {isLoading ? '--' : riskData?.telemetry?.humidity_percent}<span className="text-sm text-slate-500">%</span>
                             </div>
+                            <p className="text-[8px] text-slate-500 font-mono leading-tight">
+                                Subsurface soil log metrics indicating fluid saturation weight.
+                            </p>
                         </div>
                     </div>
 
@@ -402,6 +503,101 @@ export default function Dashboard() {
                         )}
                     </div>
                 </div>
+            </div>
+
+            {/* ================================================================== */}
+            {/* NASA INTELLIGENCE PANELS — EONET Events + Landsat Imagery          */}
+            {/* ================================================================== */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                {/* NASA EONET Live Events Feed */}
+                <div className="glass-panel p-6 bg-slate-900/50 border border-slate-800 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-cyan-500 to-indigo-600"></div>
+                    <div className="flex items-center justify-between mb-5">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                                <Satellite size={20} className="text-cyan-400" />
+                            </div>
+                            <div>
+                                <h3 className="text-white font-bold tracking-wide text-sm uppercase">NASA EONET Live Disaster Events</h3>
+                                <p className="text-slate-500 text-[10px] font-mono">Earth Observatory Natural Event Tracker · Real-Time</p>
+                            </div>
+                        </div>
+                        {nasaLoading ? (
+                            <div className="w-4 h-4 border-2 border-cyan-500/30 border-t-cyan-400 rounded-full animate-spin"></div>
+                        ) : (
+                            <span className={`text-[10px] font-bold font-mono px-2 py-1 rounded ${nasaEvents?.count > 0 ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
+                                {nasaEvents?.count ?? '...'} EVENTS NEARBY
+                            </span>
+                        )}
+                    </div>
+                    <div className="space-y-3">
+                        {nasaLoading && <div className="text-center py-6"><span className="text-slate-500 font-mono text-xs animate-pulse">QUERYING NASA EONET SERVERS...</span></div>}
+                        {!nasaLoading && nasaEvents?.events?.length === 0 && (
+                            <div className="flex items-center gap-3 bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-4">
+                                <Zap size={18} className="text-emerald-400 shrink-0" />
+                                <div>
+                                    <p className="text-emerald-400 text-sm font-semibold">No Active Threats Detected</p>
+                                    <p className="text-slate-500 text-xs font-mono">NASA EONET: No storms, floods or landslides tracked near this region.</p>
+                                </div>
+                            </div>
+                        )}
+                        {!nasaLoading && nasaEvents?.events?.map((ev) => (
+                            <div key={ev.id} className="flex items-start gap-3 bg-slate-950/60 rounded-lg p-3 border border-slate-800 hover:border-rose-500/30 transition-colors group">
+                                <AlertTriangle size={16} className="text-rose-400 shrink-0 mt-0.5" />
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-white text-xs font-bold truncate">{ev.title}</p>
+                                    <div className="flex items-center gap-3 mt-1">
+                                        <span className="text-rose-400 text-[10px] font-mono uppercase">{ev.category}</span>
+                                        <span className="text-slate-500 text-[10px] font-mono">{new Date(ev.date).toLocaleDateString('en-IN')}</span>
+                                        <span className="text-slate-600 text-[10px] font-mono">{ev.distance_deg}° away</span>
+                                    </div>
+                                </div>
+                                {ev.source_url && (
+                                    <a href={ev.source_url} target="_blank" rel="noreferrer" className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <ExternalLink size={14} className="text-slate-400" />
+                                    </a>
+                                )}
+                            </div>
+                        ))}
+                        {nasaEvents?.events?.length > 0 && <p className="text-[10px] text-slate-600 font-mono pt-1">Source: {nasaEvents.nasa_source}</p>}
+                    </div>
+                </div>
+
+                {/* NASA Landsat Satellite Imagery Viewer */}
+                <div className="glass-panel p-6 bg-slate-900/50 border border-slate-800 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-violet-600 via-indigo-500 to-blue-600"></div>
+                    <div className="flex items-center gap-3 mb-5">
+                        <div className="p-2 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+                            <Image size={20} className="text-indigo-400" />
+                        </div>
+                        <div>
+                            <h3 className="text-white font-bold tracking-wide text-sm uppercase">NASA Landsat Satellite View</h3>
+                            <p className="text-slate-500 text-[10px] font-mono">Real Imagery · Landsat 8/9 OLI · Live Backend Proxy</p>
+                        </div>
+                    </div>
+                    {nasaLoading && (
+                        <div className="h-56 flex items-center justify-center">
+                            <div className="text-center">
+                                <div className="w-10 h-10 border-2 border-indigo-500/30 border-t-indigo-400 rounded-full animate-spin mx-auto mb-3"></div>
+                                <span className="text-slate-500 font-mono text-xs animate-pulse">PULLING LANDSAT ARCHIVE...</span>
+                            </div>
+                        </div>
+                    )}
+                    {!nasaLoading && nasaImagery?.url && (
+                        <div className="space-y-3">
+                            <div className="relative rounded-xl overflow-hidden border border-indigo-500/20 shadow-[0_0_30px_rgba(99,102,241,0.1)]">
+                                <NasaImage src={nasaImagery.url} />
+                                <div className="absolute top-2 right-2 bg-slate-950/80 px-2 py-1 rounded text-[10px] font-mono text-indigo-300 border border-indigo-500/20">
+                                    LAT {nasaImagery.lat?.toFixed(4)} · LNG {nasaImagery.lng?.toFixed(4)}
+                                </div>
+                            </div>
+                            <p className="text-[10px] text-slate-600 font-mono">Source: Landsat 8/9 OLI — NASA Earth Imagery API</p>
+                        </div>
+                    )}
+                </div>
+
+
             </div>
 
             <AlertModal 

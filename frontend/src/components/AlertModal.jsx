@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, AlertTriangle, Info, ShieldCheck } from 'lucide-react';
+import { X, AlertTriangle, Info, ShieldCheck, Compass, CloudRain, Droplets, Layers, MapPin, Activity } from 'lucide-react';
 
 export default function AlertModal({ isOpen, onClose, title, message, type = 'info', data = null }) {
   if (!isOpen) return null;
@@ -58,11 +58,67 @@ export default function AlertModal({ isOpen, onClose, title, message, type = 'in
               </div>
             </div>
 
-            {data && (
-              <div className="mt-6 bg-slate-900/50 rounded-lg p-4 font-mono text-sm border border-slate-800">
-                <pre className="text-slate-400 overflow-x-auto">
-                  {JSON.stringify(data, null, 2)}
-                </pre>
+            {data && data.telemetry && (
+              <div className="mt-6 bg-slate-900/40 rounded-xl p-5 border border-slate-800/80 shadow-inner">
+                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <Activity size={14} className={styles.color.replace('text-', 'text-')} />
+                  Telemetry Breakdown
+                </h4>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Location Node */}
+                  <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
+                    <div className="flex items-center gap-2 mb-1">
+                      <MapPin size={14} className="text-blue-400" />
+                      <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Target Zone</span>
+                    </div>
+                    <div className="text-sm text-slate-200 font-mono line-clamp-1">{data.location}</div>
+                  </div>
+
+                  {/* Risk Node */}
+                  <div className={`bg-slate-950/60 p-3 rounded-lg border border-slate-800 border-l-2 ${styles.border.replace('border-', 'border-l-')}`}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <AlertTriangle size={14} className={styles.color.replace('text-', 'text-')} />
+                      <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Risk Confidence</span>
+                    </div>
+                    <div className={`text-lg font-black tracking-tight ${styles.color}`}>
+                      {data.risk_score} <span className="text-xs text-slate-500 font-normal">/ 100</span>
+                    </div>
+                  </div>
+
+                  {/* Rain Node */}
+                  <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
+                    <div className="flex items-center gap-2 mb-1">
+                      <CloudRain size={14} className="text-cyan-400" />
+                      <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Live Rainfall</span>
+                    </div>
+                    <div className="text-sm text-slate-200 font-mono">
+                      {data.telemetry.rainfall_1h_mm} <span className="text-xs text-slate-500">mm</span>
+                    </div>
+                  </div>
+
+                  {/* Humidity Node */}
+                  <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Droplets size={14} className="text-indigo-400" />
+                      <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Saturation</span>
+                    </div>
+                    <div className="text-sm text-slate-200 font-mono">
+                      {data.telemetry.humidity_percent} <span className="text-xs text-slate-500">%</span>
+                    </div>
+                  </div>
+
+                  {/* Terrain Node */}
+                  <div className="col-span-2 bg-slate-950/60 p-3 rounded-lg border border-slate-800">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Layers size={14} className="text-emerald-500" />
+                      <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Geological classification</span>
+                    </div>
+                    <div className="text-xs text-slate-300 font-mono mt-1 leading-snug">
+                      {data.telemetry.terrain_type}
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
             
