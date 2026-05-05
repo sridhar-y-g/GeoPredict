@@ -287,11 +287,9 @@ def predict_location_risk(data: LocationData, background_tasks: BackgroundTasks)
         elif final_risk >= 30:
             category = "WATCH"
 
-        # Email Dispatch Logic via Background Tasks
+        # Email Dispatch Logic (Synchronous for Vercel Serverless compat)
         if category in ["CRITICAL EVACUATION", "WARNING"] and data.user_email:
-            # We don't want to block the API response while SMTP connects to Google
-            background_tasks.add_task(
-                auth.send_disaster_alert_email,
+            auth.send_disaster_alert_email(
                 to_email=data.user_email,
                 location=weather_data.get("name", f"Lat:{lat}, Lng:{lng}"),
                 category=category,

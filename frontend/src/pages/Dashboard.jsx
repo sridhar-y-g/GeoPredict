@@ -71,6 +71,8 @@ function NasaImage({ src }) {
 }
 
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+
 export default function Dashboard() {
     const { user } = useAuth();
     
@@ -120,12 +122,12 @@ export default function Dashboard() {
         setNasaLoading(true);
         // NASA imagery: the backend streams raw image bytes, so we just build
         // the URL and let the <img> tag fetch it directly — no JSON parsing needed.
-        const imageryUrl = `http://localhost:8000/api/nasa/imagery?lat=${lat}&lng=${lng}`;
+        const imageryUrl = `${API_URL}/nasa/imagery?lat=${lat}&lng=${lng}`;
         setNasaImagery({ url: imageryUrl, lat, lng });
 
         // EONET is still JSON — fetch normally
         try {
-            const eonetRes = await fetch(`http://localhost:8000/api/nasa/eonet?lat=${lat}&lng=${lng}`);
+            const eonetRes = await fetch(`${API_URL}/nasa/eonet?lat=${lat}&lng=${lng}`);
             const eonetData = await eonetRes.json();
             setNasaEvents(eonetData);
         } catch (e) {
@@ -153,7 +155,7 @@ export default function Dashboard() {
             // Automatically inject authenticated user's email into the payload for Disaster Dispatch capability
             const finalPayload = { ...payload, user_email: userEmailRef.current, is_simulation: isSimulation };
 
-            const response = await fetch('http://localhost:8000/api/predict/location-risk', {
+            const response = await fetch(`${API_URL}/predict/location-risk`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(finalPayload)
