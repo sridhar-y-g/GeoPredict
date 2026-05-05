@@ -332,55 +332,25 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Email already registered")
     
     hashed_pass = security.get_password_hash(user.password)
-    new_user = models.User(email=user.email, hashed_password=hashed_pass, is_active=False)
+    new_user = models.User(email=user.email, hashed_password=hashed_pass, is_active=True)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
-    # Generate and assign OTP
-    otp_code = generate_otp()
-    expires = datetime.utcnow() + timedelta(minutes=security.OTP_EXPIRE_MINUTES)
-    otp_entry = models.OTP(user_id=new_user.id, otp_code=otp_code, expires_at=expires, purpose="registration")
-    db.add(otp_entry)
-    
     # Initialize empty profile
     profile_entry = models.Profile(user_id=new_user.id)
     db.add(profile_entry)
     db.commit()
 
-    # Send OTP email
-    send_otp_email(new_user.email, otp_code)
+    return {"message": "User registered successfully. You can now login.", "email": new_user.email}
 
-    return {"message": "User registered successfully. Check email for OTP to activate account.", "email": new_user.email}
 
-@router.post("/verify-otp")
-def verify_otp(payload: OTPVerify, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == payload.email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    otp_entry = db.query(models.OTP).filter(
-        models.OTP.user_id == user.id,
-        models.OTP.otp_code == payload.otp_code
-    ).first()
-
-    if not otp_entry or otp_entry.expires_at < datetime.utcnow():
-        raise HTTPException(status_code=400, detail="Invalid or expired OTP")
-    
-    user.is_active = True
-    db.delete(otp_entry)
-    db.commit()
-
-    return {"message": "Account successfully activated. You can now login."}
 
 @router.post("/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(models.User).filter(models.User.email == form_data.username).first()
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
-    
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="Account not activated. Please verify OTP.")
 
     access_token_expires = timedelta(minutes=security.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = security.create_access_token(

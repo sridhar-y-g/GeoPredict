@@ -14,7 +14,7 @@ export default function Register() {
     const [success, setSuccess] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
     
-    const { register, verifyOtp } = useAuth();
+    const { register } = useAuth();
     const navigate = useNavigate();
 
     const handleRegisterSubmit = async (e) => {
@@ -30,24 +30,7 @@ export default function Register() {
         setTimeout(async () => {
             const result = await register(email, password);
             if (result.success) {
-                setSuccess("Access Granted. Authorization OTP dispatched to your secure email pipeline.");
-                setStep('otp');
-            } else {
-                setError(result.message);
-            }
-            setIsLoading(false);
-        }, 800);
-    };
-
-    const handleOtpSubmit = async (e) => {
-        e.preventDefault();
-        setError(null);
-        setIsLoading(true);
-
-        setTimeout(async () => {
-            const result = await verifyOtp(email, otpCode);
-            if (result.success) {
-                setSuccess("Clearance Verified! Rerouting to Authorization Node...");
+                setSuccess("Access Granted. Authorization complete. Rerouting to gateway...");
                 setTimeout(() => navigate('/login'), 2000);
             } else {
                 setError(result.message);
@@ -115,10 +98,10 @@ export default function Register() {
 
                         <div className="mb-8">
                             <h2 className="text-2xl font-bold text-white mb-2">
-                                {step === 'register' ? 'Provision Account' : 'Verify Authorization OTP'}
+                                Provision Account
                             </h2>
                             <p className="text-slate-400 text-sm">
-                                {step === 'register' ? 'Submit identification metrics to network.' : 'Enter the 6-digit cryptographic verification code sent to your email.'}
+                                Submit identification metrics to network.
                             </p>
                         </div>
                         
@@ -143,8 +126,7 @@ export default function Register() {
                             )}
                         </AnimatePresence>
                         
-                        {step === 'register' && (
-                            <form onSubmit={handleRegisterSubmit} className="space-y-5">
+                        <form onSubmit={handleRegisterSubmit} className="space-y-5">
                                 <div className="space-y-1.5 group">
                                     <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-2">
                                         <Fingerprint size={14} className="text-cyan-500" />
@@ -210,49 +192,8 @@ export default function Register() {
                                     )}
                                 </button>
                             </form>
-                        )}
-
-                        {step === 'otp' && (
-                            <form onSubmit={handleOtpSubmit} className="space-y-5">
-                                <div className="space-y-1.5 group">
-                                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                                        <Lock size={14} className="text-cyan-500" />
-                                        6-Digit Verification Code
-                                    </label>
-                                    <input 
-                                        type="text" 
-                                        required 
-                                        maxLength="6"
-                                        className="glass-input w-full shadow-[inset_0_0_15px_rgba(6,182,212,0.05)] text-center text-3xl font-mono tracking-[0.5em] py-4"
-                                        value={otpCode} 
-                                        onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
-                                        placeholder="000000" 
-                                    />
-                                    <p className="text-xs text-slate-500 mt-2 text-center">We have securely transmitted a code to {email}</p>
-                                </div>
-                                
-                                <button 
-                                    type="submit" 
-                                    disabled={isLoading || otpCode.length < 6}
-                                    className="btn-cyber w-full mt-8 flex items-center justify-center gap-2 group disabled:opacity-70"
-                                >
-                                    {isLoading ? (
-                                        <>
-                                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                                            <span>Verifying...</span>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <span>Authenticate & Proceed</span>
-                                            <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
-                                        </>
-                                    )}
-                                </button>
-                            </form>
-                        )}
                         
-                        {step === 'register' && (
-                            <div className="mt-8 pt-6 border-t border-slate-800 text-center">
+                        <div className="mt-8 pt-6 border-t border-slate-800 text-center">
                                 <p className="text-slate-400 text-sm">
                                     Existing Commander Profile?<br className="hidden sm:block"/>
                                     <Link to="/login" className="text-indigo-400 hover:text-cyan-300 font-semibold transition-colors mt-2 inline-block">
@@ -260,7 +201,6 @@ export default function Register() {
                                     </Link>
                                 </p>
                             </div>
-                        )}
                     </div>
                 </div>
 

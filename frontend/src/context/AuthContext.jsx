@@ -69,20 +69,13 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    const verifyOtp = async (email, otp_code) => {
-        try {
-            await api.post('/auth/verify-otp', { email, otp_code });
-            return { success: true };
-        } catch (error) {
-            return { success: false, message: error.response?.data?.detail || "Verification failed" };
-        }
-    };
+
 
     const logout = () => {
         setToken(null);
     };
 
-    const value = { user, token, api, login, register, verifyOtp, logout, loading };
+    const value = { user, token, api, login, register, logout, loading };
 
     return (
         <AuthContext.Provider value={value}>
