@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+pydantic
+pydantic[email]
+python-multipart
+passlib[bcrypt]
+bcrypt==4.2.1
+python-jose[cryptography]
+python-dotenv
+# Add these below when proceeding with training real data:
+# xgboost
+# scikit-learn
+# ultralytics
+# pandas
+# numpy
+requests
