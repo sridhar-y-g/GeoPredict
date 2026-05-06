@@ -1,7 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Form, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import text
 import random
 import time
 import os
@@ -9,11 +8,7 @@ import smtplib
 import logging
 import requests
 
-from database import engine
-import models
 import auth
-import profile
-import admin
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -21,16 +16,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Startup Validation Checks ---
-# 1. SQL Database Password & Connection Check
-try:
-    with engine.connect() as connection:
-        connection.execute(text("SELECT 1"))
-    logger.info("SQL database connected successfully.")
-except Exception as e:
-    logger.error(f"SQL Database connection failed! Password or config incorrect: {e}")
-
-# 2. Email Service Password Check
+# 1. Email Service Password Check
 smtp_password = os.getenv("SMTP_PASSWORD")
 smtp_user = os.getenv("SMTP_USER")
 if smtp_password and smtp_password != "your_app_password" and smtp_user:
@@ -43,9 +29,6 @@ if smtp_password and smtp_password != "your_app_password" and smtp_user:
         logger.error(f"Email service (SMTP) login failed! Incorrect password or config: {e}")
 else:
     logger.warning("Email service credentials not properly set. Check .env file.")
-
-# Initialize database tables
-models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="GeoPredict Early Warning System API", version="1.0.0")
 
@@ -60,8 +43,6 @@ app.add_middleware(
 
 # Mount Routers
 app.include_router(auth.router)
-app.include_router(profile.router)
-app.include_router(admin.router)
 
 class TelemetryData(BaseModel):
     rainfall_mm: float
@@ -81,7 +62,7 @@ def read_root():
     return {"message": "GeoPredict API is running. Systems Nominal."}
 
 @app.post("/api/predict/temporal")
-def predict_temporal(data: TelemetryData, background_tasks: BackgroundTasks, current_user: models.User = Depends(auth.get_current_user)):
+def predict_temporal(data: TelemetryData, background_tasks: BackgroundTasks, current_user: dict = Depends(auth.get_current_user)):
     """
     Receives current telemetry (like Rainfall, Slope Angle, Soil Saturation).
     Requires active user session.

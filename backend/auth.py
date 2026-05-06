@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
-from sqlalchemy.orm import Session
+import security
+from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta
 import random
 import os
@@ -13,9 +14,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from database import get_db
-import models, security
-from pydantic import BaseModel, EmailStr
+# In-Memory Database (will reset on server restart)
+fake_db_users = {}
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class OTPVerify(BaseModel):
     otp_code: str
 
 # Token validation dependency
-def get_current_user(token: str = Depends(security.oauth2_scheme), db: Session = Depends(get_db)):
+def get_current_user(token: str = Depends(security.oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -43,8 +43,9 @@ def get_current_user(token: str = Depends(security.oauth2_scheme), db: Session =
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    user = db.query(models.User).filter(models.User.email == email).first()
-    if user is None:
+    
+    user = fake_db_users.get(email)
+    if not user:
         raise credentials_exception
     return user
 
@@ -326,39 +327,43 @@ def send_disaster_alert_email(to_email: str, location: str, category: str, risk_
 
 
 @router.post("/register")
-def register_user(user: UserCreate, db: Session = Depends(get_db)):
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
-    if db_user:
+def register_user(user: UserCreate):
+    if user.email in fake_db_users:
         raise HTTPException(status_code=400, detail="Email already registered")
     
     hashed_pass = security.get_password_hash(user.password)
-    new_user = models.User(email=user.email, hashed_password=hashed_pass, is_active=True)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    
+    # Store user in memory
+    fake_user = {
+        "id": len(fake_db_users) + 1,
+        "email": user.email,
+        "hashed_password": hashed_pass,
+        "is_active": True,
+        "is_admin": False
+    }
+    fake_db_users[user.email] = fake_user
 
-    # Initialize empty profile
-    profile_entry = models.Profile(user_id=new_user.id)
-    db.add(profile_entry)
-    db.commit()
-
-    return {"message": "User registered successfully. You can now login.", "email": new_user.email}
-
+    return {"message": "User registered successfully. You can now login.", "email": user.email}
 
 
 @router.post("/login")
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == form_data.username).first()
-    if not user or not security.verify_password(form_data.password, user.hashed_password):
+def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = fake_db_users.get(form_data.username)
+    if not user or not security.verify_password(form_data.password, user["hashed_password"]):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
 
     access_token_expires = timedelta(minutes=security.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = security.create_access_token(
-        data={"sub": user.email, "is_admin": user.is_admin}, expires_delta=access_token_expires
+        data={"sub": user["email"], "is_admin": user["is_admin"]}, expires_delta=access_token_expires
     )
     
-    return {"access_token": access_token, "token_type": "bearer", "is_admin": user.is_admin}
+    return {"access_token": access_token, "token_type": "bearer", "is_admin": user["is_admin"]}
 
 @router.get("/me")
-def read_users_me(current_user: models.User = Depends(get_current_user)):
-    return {"id": current_user.id, "email": current_user.email, "is_admin": current_user.is_admin, "is_active": current_user.is_active}
+def read_users_me(current_user: dict = Depends(get_current_user)):
+    return {
+        "id": current_user["id"], 
+        "email": current_user["email"], 
+        "is_admin": current_user["is_admin"], 
+        "is_active": current_user["is_active"]
+    }

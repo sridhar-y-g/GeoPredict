@@ -7,8 +7,6 @@ import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
-import Profile from './pages/Profile';
-import Admin from './pages/Admin';
 import { LogOut, User, Settings, Shield, Activity } from 'lucide-react';
 
 function Navbar() {
@@ -39,22 +37,11 @@ function Navbar() {
                                         <span className="text-xs font-mono text-slate-400">{user.email}</span>
                                     </div>
                                 </div>
-                                
-                                {user.is_admin && (
-                                    <Link to="/admin" className="p-2 text-slate-400 hover:text-cyan-400 hover:bg-cyan-400/10 rounded-lg transition-all" title="Admin Control Panel">
-                                        <Shield size={20} />
-                                    </Link>
-                                )}
-                                
                                 <Link to="/dashboard" className="px-4 py-2 text-sm font-semibold text-slate-300 hover:text-blue-400 hover:bg-blue-500/10 rounded-lg transition-all duration-300">
                                     Dashboard
                                 </Link>
                                 
                                 <div className="w-px h-6 bg-slate-700/50 mx-2 hidden sm:block"></div>
-                                
-                                <Link to="/profile" className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all" title="Commander Profile">
-                                    <User size={20} />
-                                </Link>
                                 <button onClick={logout} className="p-2 text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-all ml-1" title="Terminate Session">
                                     <LogOut size={20} />
                                 </button>
@@ -86,18 +73,6 @@ function App() {
                         <Route path="/dashboard" element={
                             <ProtectedRoute>
                                 <Dashboard />
-                            </ProtectedRoute>
-                        } />
-                        
-                        <Route path="/profile" element={
-                            <ProtectedRoute>
-                                <Profile />
-                            </ProtectedRoute>
-                        } />
-                        
-                        <Route path="/admin" element={
-                            <ProtectedRoute requireAdmin={true}>
-                                <Admin />
                             </ProtectedRoute>
                         } />
                     </Routes>
