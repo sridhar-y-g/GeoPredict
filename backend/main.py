@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form, Depends
+from fastapi import FastAPI, UploadFile, File, Form, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -75,14 +75,13 @@ class LocationData(BaseModel):
     lng: Optional[float] = None
     city_name: Optional[str] = None
     user_email: Optional[str] = None
-    is_simulation: Optional[bool] = False
 
 @app.get("/")
 def read_root():
     return {"message": "GeoPredict API is running. Systems Nominal."}
 
 @app.post("/api/predict/temporal")
-def predict_temporal(data: TelemetryData, current_user: models.User = Depends(auth.get_current_user)):
+def predict_temporal(data: TelemetryData, background_tasks: BackgroundTasks, current_user: models.User = Depends(auth.get_current_user)):
     """
     Receives current telemetry (like Rainfall, Slope Angle, Soil Saturation).
     Requires active user session.
@@ -156,8 +155,6 @@ async def predict_spatial(file: UploadFile = File(...), current_user: models.Use
         "detections": len(boxes),
         "results": boxes
     }
-
-from fastapi import BackgroundTasks
 
 @app.post("/api/predict/location-risk")
 def predict_location_risk(data: LocationData, background_tasks: BackgroundTasks):
@@ -273,10 +270,6 @@ def predict_location_risk(data: LocationData, background_tasks: BackgroundTasks)
         # ==============================================================================
 
         final_risk = min(100.0, max(0.0, base_risk))
-        
-        # [SIMULATION UI LINK] Only force high risk if the Dashboard 'Simulate Storm' button is active.
-        if hasattr(data, 'is_simulation') and data.is_simulation:
-            final_risk = max(final_risk, 85.0)
 
         # Override local category with strict classification bounds based on risk
         category = "SAFE"
@@ -287,9 +280,10 @@ def predict_location_risk(data: LocationData, background_tasks: BackgroundTasks)
         elif final_risk >= 30:
             category = "WATCH"
 
-        # Email Dispatch Logic (Synchronous for Vercel Serverless compat)
+        # Email Dispatch Logic via Background Tasks (Supported on Render)
         if category in ["CRITICAL EVACUATION", "WARNING"] and data.user_email:
-            auth.send_disaster_alert_email(
+            background_tasks.add_task(
+                auth.send_disaster_alert_email,
                 to_email=data.user_email,
                 location=weather_data.get("name", f"Lat:{lat}, Lng:{lng}"),
                 category=category,

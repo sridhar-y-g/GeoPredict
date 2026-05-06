@@ -81,7 +81,7 @@ export default function Dashboard() {
     const [riskData, setRiskData] = useState(null);
     const [coords, setCoords] = useState({ lat: 11.6854, lng: 76.1320 }); 
     const [modalConfig, setModalConfig] = useState({ isOpen: false, title: '', message: '', type: 'info', data: null });
-    const [isSimulation, setIsSimulation] = useState(false); // Developer toggle to force storm conditions
+    const [lastUpdated, setLastUpdated] = useState(new Date());
 
     // Stale Closure Fix: Keep a live reference to the user's email 
     // so async callbacks like dragend() always have the latest value.
@@ -149,11 +149,23 @@ export default function Dashboard() {
         }
     }, []);
 
+    useEffect(() => {
+        // Real-Time Monitoring Polling (Every 5 minutes)
+        const intervalId = setInterval(() => {
+            console.log("Automated Real-Time Scan Triggered");
+            if (coords.lat && coords.lng) {
+                fetchRiskData({ lat: coords.lat, lng: coords.lng });
+                fetchNasaData(coords.lat, coords.lng);
+            }
+        }, 300000); // 300,000 ms = 5 minutes
+        return () => clearInterval(intervalId);
+    }, [coords]);
+
     const fetchRiskData = async (payload) => {
         setIsLoading(true);
         try {
             // Automatically inject authenticated user's email into the payload for Disaster Dispatch capability
-            const finalPayload = { ...payload, user_email: userEmailRef.current, is_simulation: isSimulation };
+            const finalPayload = { ...payload, user_email: userEmailRef.current };
 
             const response = await fetch(`${API_URL}/predict/location-risk`, {
                 method: 'POST',
@@ -193,6 +205,7 @@ export default function Dashboard() {
         } catch (error) {
             setModalConfig({ isOpen: true, title: "Telemetry Error", message: error.message, type: 'critical' });
         } finally {
+            setLastUpdated(new Date());
             setIsLoading(false);
         }
     };
@@ -244,9 +257,14 @@ export default function Dashboard() {
             {/* Header / Search Area */}
             <div className="flex flex-col xl:flex-row justify-between items-start xl:items-end gap-6 relative z-10 w-full pl-0">
                 <div>
-                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-900 border border-slate-700/50 rounded-lg text-xs text-slate-400 mb-4 shadow-sm">
-                        <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse-glow"></span>
-                        LANDSLIDE DISASTER PREVENTION ACTIVE
+                    <div className="flex items-center gap-4 mb-4">
+                        <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-900 border border-slate-700/50 rounded-lg text-xs text-slate-400 shadow-sm">
+                            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse-glow"></span>
+                            LIVE TRACKING ACTIVE
+                        </div>
+                        <div className="text-[10px] uppercase font-bold tracking-widest text-slate-500">
+                            Last Updated: {lastUpdated.toLocaleTimeString()}
+                        </div>
                     </div>
                     <h1 className="text-4xl font-black tracking-tight text-white drop-shadow-md">
                         Global GIS Monitoring Overview
@@ -254,28 +272,15 @@ export default function Dashboard() {
                 </div>
 
                 <div className="flex flex-col items-end gap-2 w-full xl:w-[450px] z-50">
-                    <label className="flex items-center gap-2 cursor-pointer text-[10px] uppercase font-bold tracking-widest text-slate-400 hover:text-rose-400 transition-colors">
-                        <input 
-                            type="checkbox" 
-                            checked={isSimulation}
-                            onChange={(e) => setIsSimulation(e.target.checked)}
-                            className="accent-rose-500 w-3 h-3"
-                        />
-                        <AlertTriangle size={12} className={isSimulation ? "text-rose-500" : "text-slate-500"} />
-                        Force Critical Simulation Drill
-                    </label>
                     <form onSubmit={handleSearch} className="w-full relative group z-50">
                     <input 
                         type="text" 
                         value={searchCity}
                         onChange={(e) => setSearchCity(e.target.value)}
                         placeholder="Intercept Coordinate or City..."
-                        className="glass-input pl-12 pr-28 text-white h-14 w-full bg-slate-900/80 backdrop-blur-xl border border-blue-500/30 font-mono shadow-[0_0_20px_rgba(37,99,235,0.15)] focus:shadow-[0_0_25px_rgba(6,182,212,0.4)] transition-all"
+                        className="glass-input pl-12 pr-20 text-white h-14 w-full bg-slate-900/80 backdrop-blur-xl border border-blue-500/30 font-mono shadow-[0_0_20px_rgba(37,99,235,0.15)] focus:shadow-[0_0_25px_rgba(6,182,212,0.4)] transition-all"
                     />
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500 group-focus-within:text-cyan-400 z-50 transition-colors" size={20} />
-                    <button type="button" onClick={() => setIsSimulation(!isSimulation)} className={`absolute right-32 top-1/2 -translate-y-1/2 px-4 py-2 font-bold rounded shadow-lg transition-all text-xs tracking-widest h-10 ${isSimulation ? 'bg-rose-600 text-white animate-pulse shadow-rose-500/50' : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white hover:bg-slate-700'}`}>
-                        {isSimulation ? 'STORM ACTIVE' : 'SIMULATE'}
-                    </button>
                     <button type="submit" disabled={isLoading} className="absolute right-2 top-1/2 -translate-y-1/2 px-6 py-2 bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-bold rounded shadow-lg hover:shadow-cyan-500/30 transition-all text-xs tracking-widest disabled:opacity-50 h-10 w-26">
                         {isLoading ? '...' : 'SCAN'}
                     </button>
