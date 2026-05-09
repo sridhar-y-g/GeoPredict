@@ -27,7 +27,7 @@ desktop.ini
 *.pdf
 *.docx
 *.pptx
-*.html
+# *.html
 *.txt
 walkthrough*
 create_*.py

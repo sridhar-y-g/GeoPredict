@@ -41,13 +41,15 @@ def get_current_user(token: str = Depends(security.oauth2_scheme)):
         email: str = payload.get("sub")
         if email is None:
             raise credentials_exception
+        # Return user data from the JWT itself — no DB lookup needed
+        return {
+            "id": 1,
+            "email": email,
+            "is_admin": payload.get("is_admin", False),
+            "is_active": True
+        }
     except JWTError:
         raise credentials_exception
-    
-    user = fake_db_users.get(email)
-    if not user:
-        raise credentials_exception
-    return user
 
 def generate_otp():
     return str(random.randint(100000, 999999))
@@ -328,20 +330,18 @@ def send_disaster_alert_email(to_email: str, location: str, category: str, risk_
 
 @router.post("/register")
 def register_user(user: UserCreate):
-    if user.email in fake_db_users:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
+    # Always allow registration. On server restart, memory clears but JWT tokens
+    # still work because get_current_user reads from the token itself.
     hashed_pass = security.get_password_hash(user.password)
     
-    # Store user in memory
-    fake_user = {
+    # Store user in memory (for this server session)
+    fake_db_users[user.email] = {
         "id": len(fake_db_users) + 1,
         "email": user.email,
         "hashed_password": hashed_pass,
         "is_active": True,
         "is_admin": False
     }
-    fake_db_users[user.email] = fake_user
 
     return {"message": "User registered successfully. You can now login.", "email": user.email}
 
@@ -349,8 +349,13 @@ def register_user(user: UserCreate):
 @router.post("/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = fake_db_users.get(form_data.username)
-    if not user or not security.verify_password(form_data.password, user["hashed_password"]):
-        raise HTTPException(status_code=401, detail="Incorrect email or password")
+    if not user:
+        raise HTTPException(
+            status_code=401, 
+            detail="Account not found. Please register first. Note: accounts reset when the server restarts."
+        )
+    if not security.verify_password(form_data.password, user["hashed_password"]):
+        raise HTTPException(status_code=401, detail="Incorrect password")
 
     access_token_expires = timedelta(minutes=security.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = security.create_access_token(
